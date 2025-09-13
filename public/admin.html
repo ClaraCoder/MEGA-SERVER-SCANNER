@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>REALSCAN Admin Panel</title>
+  <style>
+    :root{
+      --green:#00ff7b;--red:#ff3b3b;--bg:#0b0f0c;--card:#0f1512;--muted:#9aa5a1;--line:#183127;
+    }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu; background:#0b0f0c; color:#e9f1ed; margin:0; padding:20px;}
+    .wrap{max-width:960px; margin:0 auto;}
+    h1{margin:0 0 6px 0;}
+    .sub{color:var(--muted); margin-bottom:22px;}
+    .grid{display:grid; grid-template-columns:1fr 1.2fr; gap:16px;}
+    .card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px;}
+    label{display:block; font-weight:600; margin-bottom:6px;}
+    input[type="number"], select, textarea{
+      width:100%; background:#0c120e; color:#dff6ec; border:1px solid var(--line); border-radius:8px; padding:10px; outline:none;
+    }
+    textarea{min-height:100px; resize:vertical;}
+    .row{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;}
+    .btn{background:#10381f; border:1px solid #1f5e39; color:#aefad1; padding:12px 14px; border-radius:10px; cursor:pointer; font-weight:700;}
+    .btn:hover{background:#14512a;}
+    .btn.red{background:#3a1010; border-color:#7a2323; color:#ffb8b8;}
+    .muted{color:var(--muted);}
+    .list{margin-top:12px; border-top:1px solid var(--line);}
+    table{width:100%; border-collapse:collapse; font-size:14px;}
+    th,td{border-bottom:1px solid var(--line); padding:10px; text-align:left; vertical-align:top;}
+    .pill{display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); background:#0d1712;}
+    .ok{color:#8cffc8;}
+    .bad{color:#ff8b8b;}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
+    .copy{margin-left:8px; font-size:12px; cursor:pointer; color:#9cf5c8; border:none; background:transparent;}
+    .hint{font-size:12px; color:#a5b0ac; margin-top:8px;}
+    .link{color:#aefad1; text-decoration:none;}
+    @media (max-width:900px){ .grid{grid-template-columns:1fr;} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>REALSCAN — Admin Panel</h1>
+    <div class="sub">Jana kod akses, letak nota admin, set tempoh sah, dan urus kod aktif.</div>
+
+    <div class="grid">
+      <div class="card">
+        <h3 style="margin-top:0">Jana Kod Akses</h3>
+        <label>Nota admin (dipapar pada halaman scanner)</label>
+        <textarea id="note" placeholder="Contoh: Sila gunakan mod QUICK SCAN dulu, kemudian DEEP bila perlu."></textarea>
+
+        <div class="row">
+          <div>
+            <label>Tempoh</label>
+            <input id="duration" type="number" min="1" value="30"/>
+          </div>
+          <div>
+            <label>Unit</label>
+            <select id="unit">
+              <option value="minutes">Minit</option>
+              <option value="hours">Jam</option>
+            </select>
+          </div>
+        </div>
+
+        <button class="btn" id="btnGen">Generate</button>
+
+        <div id="genResult" class="hint"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0">Pautan Panel</h3>
+        <div class="muted">Buka admin: <span class="mono" id="adminUrl"></span>
+          <button class="copy" id="copyAdmin">Copy</button>
+        </div>
+        <div class="hint">Halaman scanner universal: <span class="mono" id="scanUrl"></span>
+          <button class="copy" id="copyScan">Copy</button>
+        </div>
+        <div class="hint">Pengguna akan masukkan kod yang anda berikan pada halaman scanner.</div>
+      </div>
+    </div>
+
+    <div class="card list">
+      <h3 style="margin-top:0">Senarai Kod</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Kod</th>
+            <th>Nota</th>
+            <th>Status</th>
+            <th>Baki</th>
+            <th>Dibuat</th>
+            <th>Tamat</th>
+            <th>Tindakan</th>
+          </tr>
+        </thead>
+        <tbody id="codeRows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const adminUrlEl = document.getElementById('adminUrl');
+    const scanUrlEl = document.getElementById('scanUrl');
+
+    const base = location.origin;
+    adminUrlEl.textContent = base + '/admin.html';
+    scanUrlEl.textContent = base + '/scanner.html';
+
+    document.getElementById('copyAdmin').onclick = () => navigator.clipboard.writeText(adminUrlEl.textContent);
+    document.getElementById('copyScan').onclick = () => navigator.clipboard.writeText(scanUrlEl.textContent);
+
+    async function fetchCodes() {
+      const r = await fetch('/api/codes');
+      const j = await r.json();
+      return j.codes || [];
+    }
+
+    function fmt(dt) {
+      try { return new Date(dt).toLocaleString('ms-MY', { hour12:false }); } catch { return dt; }
+    }
+    function fmtRemain(sec) {
+      const s = Math.max(0, sec|0);
+      const hh = Math.floor(s/3600).toString().padStart(2,'0');
+      const mm = Math.floor((s%3600)/60).toString().padStart(2,'0');
+      const ss = (s%60).toString().padStart(2,'0');
+      return `${hh}:${mm}:${ss}`;
+    }
+
+    const tbody = document.getElementById('codeRows');
+    let cache = [];
+
+    function render() {
+      tbody.innerHTML = '';
+      cache.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="mono">${row.code}</td>
+          <td>${row.note ? row.note.replace(/</g,'&lt;') : '-'}</td>
+          <td>${row.status === 'active' ? '<span class="pill ok">Aktif</span>' :
+              row.status === 'expired' ? '<span class="pill bad">Tamat</span>' :
+              '<span class="pill bad">Disekat</span>'}</td>
+          <td class="mono" data-code="${row.code}" data-exp="${row.expiresAt}" data-status="${row.status}">${fmtRemain(row.remainingSec)}</td>
+          <td>${fmt(row.createdAt)}</td>
+          <td>${fmt(row.expiresAt)}</td>
+          <td>
+            ${row.status === 'active' ?
+              `<button class="btn red" data-action="revoke" data-code="${row.code}">Tamatkan/Sekat</button>` :
+              `<span class="muted">—</span>`}
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Button revoke
+      tbody.querySelectorAll('[data-action="revoke"]').forEach(btn=>{
+        btn.onclick = async () => {
+          if (!confirm('Sahkan tamat/sekat kod ' + btn.dataset.code + ' ?')) return;
+          await fetch('/api/codes/' + btn.dataset.code, { method: 'DELETE' });
+          await refresh();
+        };
+      });
+    }
+
+    function tickCountdown() {
+      const now = Date.now();
+      tbody.querySelectorAll('td[data-code]').forEach(td=>{
+        const status = td.getAttribute('data-status');
+        if (status !== 'active') return;
+        const exp = new Date(td.getAttribute('data-exp')).getTime();
+        const remain = Math.max(0, Math.floor((exp - now)/1000));
+        td.textContent = fmtRemain(remain);
+        if (remain <= 0) td.setAttribute('data-status', 'expired');
+      });
+    }
+
+    async function refresh() {
+      cache = await fetchCodes();
+      render();
+    }
+
+    setInterval(tickCountdown, 1000);
+    refresh();
+
+    // Generate code
+    const btnGen = document.getElementById('btnGen');
+    btnGen.onclick = async () => {
+      const duration = Number(document.getElementById('duration').value || 0);
+      const unit = document.getElementById('unit').value;
+      const note = document.getElementById('note').value || '';
+
+      const r = await fetch('/api/codes',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ duration, unit, note })
+      });
+      const j = await r.json();
+      const box = document.getElementById('genResult');
+      if (!j.ok) {
+        box.innerHTML = `<span style="color:#ff8b8b">Gagal: ${j.error || 'Ralat'}</span>`;
+        return;
+      }
+      box.innerHTML = `
+        <div style="margin-top:8px">
+          <div><strong>Kod:</strong> <span class="mono">${j.code}</span> <button class="copy" onclick="navigator.clipboard.writeText('${j.code}')">Copy</button></div>
+          <div><strong>Pautan scanner:</strong> <a class="link" href="${j.link}" target="_blank">${location.origin}${j.link}</a></div>
+          <div><strong>Tamat:</strong> ${fmt(j.expiresAt)}</div>
+        </div>
+      `;
+      await refresh();
+    };
+  </script>
+</body>
+</html>
